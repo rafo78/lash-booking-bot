@@ -16,6 +16,9 @@ def get_main_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📋 Мои записи"),
                 KeyboardButton(text="ℹ️ О сервисе"),
             ],
+            [
+                KeyboardButton(text="👩 О Полечке"),
+            ],
         ],
         resize_keyboard=True,
     )

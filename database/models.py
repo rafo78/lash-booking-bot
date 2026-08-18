@@ -50,6 +50,10 @@ class User(Base):
         nullable=False,
     )
 
+    bookings: Mapped[list["Booking"]] = relationship(
+        back_populates="user",
+    )
+
 
 class Master(Base):
     __tablename__ = "masters"
@@ -92,6 +96,10 @@ class Master(Base):
     services: Mapped[list["Service"]] = relationship(
         back_populates="master",
         cascade="all, delete-orphan",
+    )
+
+    bookings: Mapped[list["Booking"]] = relationship(
+        back_populates="master",
     )
 
 
@@ -147,4 +155,86 @@ class Service(Base):
 
     master: Mapped["Master"] = relationship(
         back_populates="services",
+    )
+
+    bookings: Mapped[list["Booking"]] = relationship(
+        back_populates="service",
+    )
+
+
+class Booking(Base):
+    __tablename__ = "bookings"
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+
+    master_id: Mapped[int] = mapped_column(
+        ForeignKey("masters.id"),
+        nullable=False,
+        index=True,
+    )
+
+    service_id: Mapped[int] = mapped_column(
+        ForeignKey("services.id"),
+        nullable=False,
+        index=True,
+    )
+
+    booking_date: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        index=True,
+    )
+
+    booking_time: Mapped[str] = mapped_column(
+        String(5),
+        nullable=False,
+    )
+
+    duration_min: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    price: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    led: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="confirmed",
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(
+        back_populates="bookings",
+    )
+
+    master: Mapped["Master"] = relationship(
+        back_populates="bookings",
+    )
+
+    service: Mapped["Service"] = relationship(
+        back_populates="bookings",
     )
