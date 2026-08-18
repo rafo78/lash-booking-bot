@@ -130,12 +130,20 @@ async def my_bookings_handler(message: Message):
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
+                            text="🔄 Перенести запись",
+                            callback_data=(
+                                f"booking_reschedule:{booking.id}"
+                            ),
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
                             text="❌ Отменить запись",
                             callback_data=(
                                 f"booking_cancel:{booking.id}"
                             ),
                         )
-                    ]
+                    ],
                 ]
             ),
             parse_mode="HTML",

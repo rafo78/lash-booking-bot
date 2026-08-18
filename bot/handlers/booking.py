@@ -1001,13 +1001,109 @@ async def my_bookings(message: Message):
                 parse_mode="HTML",
             )
 # ============================================================
-# ❌ ОТМЕНА ЗАПИСИ
+# 👤 ПОЛУЧИТЬ ID ПОЛЬЗОВАТЕЛЯ
+# ============================================================
+
+async def get_user_id(telegram_id: int) -> int | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(
+                User.telegram_id == telegram_id
+            )
+        )
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            return None
+
+        return user.id
+
+# ============================================================
+# ❌ ОТМЕНА ЗАПИСИ — ПОДТВЕРЖДЕНИЕ
 # ============================================================
 
 @router.callback_query(
     F.data.startswith("booking_cancel:")
 )
 async def booking_cancel(callback: CallbackQuery):
+    booking_id = int(
+        callback.data.split(":", 1)[1]
+    )
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Booking).where(
+                Booking.id == booking_id
+            )
+        )
+
+        booking = result.scalar_one_or_none()
+
+    if booking is None:
+        await callback.answer(
+            "Запись не найдена.",
+            show_alert=True,
+        )
+        return
+
+    if booking.user_id != await get_user_id(
+        callback.from_user.id
+    ):
+        await callback.answer(
+            "Это не ваша запись.",
+            show_alert=True,
+        )
+        return
+
+    if booking.status != "confirmed":
+        await callback.answer(
+            "Эта запись уже отменена.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.edit_text(
+        "⚠️ <b>Отменить запись?</b>\n\n"
+        "Вы действительно хотите отменить эту запись?\n\n"
+        "После отмены это время снова станет доступно "
+        "для других клиентов.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Да, отменить",
+                        callback_data=(
+                            f"booking_cancel_confirm:"
+                            f"{booking.id}"
+                        ),
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="↩️ Оставить запись",
+                        callback_data=(
+                            f"booking_cancel_back:"
+                            f"{booking.id}"
+                        ),
+                    )
+                ],
+            ]
+        ),
+        parse_mode="HTML",
+    )
+
+    await callback.answer()
+
+
+# ============================================================
+# ❌ ОТМЕНА ЗАПИСИ — ПОДТВЕРЖДЕНИЕ ОТМЕНЫ
+# ============================================================
+
+@router.callback_query(
+    F.data.startswith("booking_cancel_confirm:")
+)
+async def booking_cancel_confirm(callback: CallbackQuery):
     booking_id = int(
         callback.data.split(":", 1)[1]
     )
@@ -1028,10 +1124,8 @@ async def booking_cancel(callback: CallbackQuery):
             )
             return
 
-        if booking.user_id != (
-            await get_user_id(
-                callback.from_user.id
-            )
+        if booking.user_id != await get_user_id(
+            callback.from_user.id
         ):
             await callback.answer(
                 "Это не ваша запись.",
@@ -1059,17 +1153,496 @@ async def booking_cancel(callback: CallbackQuery):
     await callback.answer(
         "Запись отменена ✅"
     )
-async def get_user_id(telegram_id: int) -> int | None:
+
+
+# ============================================================
+# ↩️ ОТМЕНА — ВЕРНУТЬСЯ К ЗАПИСИ
+# ============================================================
+
+@router.callback_query(
+    F.data.startswith("booking_cancel_back:")
+)
+async def booking_cancel_back(callback: CallbackQuery):
+    booking_id = int(
+        callback.data.split(":", 1)[1]
+    )
+
     async with async_session() as session:
         result = await session.execute(
-            select(User).where(
-                User.telegram_id == telegram_id
+            select(Booking).where(
+                Booking.id == booking_id
             )
         )
 
-        user = result.scalar_one_or_none()
+        booking = result.scalar_one_or_none()
 
-        if user is None:
-            return None
+        if booking is None:
+            await callback.answer(
+                "Запись не найдена.",
+                show_alert=True,
+            )
+            return
 
-        return user.id
+        if booking.user_id != await get_user_id(
+            callback.from_user.id
+        ):
+            await callback.answer(
+                "Это не ваша запись.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Master).where(
+                Master.id == booking.master_id
+            )
+        )
+
+        master = result.scalar_one_or_none()
+
+        result = await session.execute(
+            select(Service).where(
+                Service.id == booking.service_id
+            )
+        )
+
+        service = result.scalar_one_or_none()
+
+    if master is None or service is None:
+        await callback.answer(
+            "Данные записи не найдены.",
+            show_alert=True,
+        )
+        return
+
+    start = datetime.strptime(
+        booking.booking_time,
+        "%H:%M",
+    )
+
+    end = start + timedelta(
+        minutes=booking.duration_min
+    )
+
+    await callback.message.edit_text(
+        "📋 <b>Моя запись</b>\n\n"
+        f"💗 <b>{service.name}</b>\n"
+        f"👩 Мастер: {master.name}\n"
+        f"📅 Дата: {booking.booking_date}\n"
+        f"🕐 Время: "
+        f"{booking.booking_time}–{end.strftime('%H:%M')}\n"
+        f"💰 Цена: {booking.price} ₽\n"
+        f"{'💡 LED-наращивание +200 ₽' if booking.led else ''}",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Перенести запись",
+                        callback_data=(
+                            f"booking_reschedule:{booking.id}"
+                        ),
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Отменить запись",
+                        callback_data=(
+                            f"booking_cancel:{booking.id}"
+                        ),
+                    )
+                ],
+            ]
+        ),
+        parse_mode="HTML",
+    )
+
+    await callback.answer()
+# ============================================================
+# 🔄 ПЕРЕНОС ЗАПИСИ — НАЧАЛО
+# ============================================================
+@router.callback_query(
+    F.data.startswith("booking_reschedule:")
+)
+async def booking_reschedule(callback: CallbackQuery):
+    booking_id = int(
+        callback.data.split(":", 1)[1]
+    )
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Booking).where(
+                Booking.id == booking_id
+            )
+        )
+
+        booking = result.scalar_one_or_none()
+
+    if booking is None:
+        await callback.answer(
+            "Запись не найдена.",
+            show_alert=True,
+        )
+        return
+
+    if booking.user_id != await get_user_id(
+        callback.from_user.id
+    ):
+        await callback.answer(
+            "Это не ваша запись.",
+            show_alert=True,
+        )
+        return
+
+    if booking.status != "confirmed":
+        await callback.answer(
+            "Эту запись нельзя перенести.",
+            show_alert=True,
+        )
+        return
+
+    today = date.today()
+
+    buttons = []
+
+    for offset in range(14):
+        current_date = today + timedelta(days=offset)
+
+        buttons.append(
+            InlineKeyboardButton(
+                text=current_date.strftime("%d.%m"),
+                callback_data=(
+                    f"reschedule_date:"
+                    f"{booking.id}:"
+                    f"{current_date.isoformat()}"
+                ),
+            )
+        )
+
+    keyboard = []
+
+    for i in range(0, len(buttons), 2):
+        keyboard.append(
+            buttons[i:i + 2]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data="my_bookings_back",
+            )
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🔄 <b>Перенос записи</b>\n\n"
+        "📅 Выберите новую дату:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        ),
+        parse_mode="HTML",
+    )
+
+    await callback.answer()
+# ============================================================
+# 🔄 ПЕРЕНОС ЗАПИСИ — ВЫБОР НОВОГО ВРЕМЕНИ
+# ============================================================
+
+@router.callback_query(
+    F.data.startswith("reschedule_date:")
+)
+async def reschedule_date(callback: CallbackQuery):
+    _, booking_id, selected_date = (
+        callback.data.split(":", 2)
+    )
+
+    booking_id = int(booking_id)
+
+    selected = date.fromisoformat(selected_date)
+
+    if selected < date.today():
+        await callback.answer(
+            "Нельзя выбрать прошедшую дату.",
+            show_alert=True,
+        )
+        return
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Booking).where(
+                Booking.id == booking_id
+            )
+        )
+
+        booking = result.scalar_one_or_none()
+
+        if booking is None:
+            await callback.answer(
+                "Запись не найдена.",
+                show_alert=True,
+            )
+            return
+
+        if booking.user_id != await get_user_id(
+            callback.from_user.id
+        ):
+            await callback.answer(
+                "Это не ваша запись.",
+                show_alert=True,
+            )
+            return
+
+        if booking.status != "confirmed":
+            await callback.answer(
+                "Эту запись нельзя перенести.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Service).where(
+                Service.id == booking.service_id,
+                Service.is_active.is_(True),
+            )
+        )
+
+        service = result.scalar_one_or_none()
+
+        if service is None:
+            await callback.answer(
+                "Услуга больше недоступна.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Master).where(
+                Master.id == booking.master_id,
+                Master.is_active.is_(True),
+            )
+        )
+
+        master = result.scalar_one_or_none()
+
+        if master is None:
+            await callback.answer(
+                "Мастер больше недоступен.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Booking).where(
+                Booking.master_id == master.id,
+                Booking.booking_date == selected_date,
+                Booking.status.in_(
+                    ["confirmed", "pending"]
+                ),
+                Booking.id != booking.id,
+            )
+        )
+
+        bookings = result.scalars().all()
+
+    slots = build_free_slots(
+        master=master,
+        service=service,
+        selected_date=selected,
+        bookings=bookings,
+    )
+
+    if not slots:
+        await callback.answer(
+            "На эту дату свободного времени нет.",
+            show_alert=True,
+        )
+        return
+
+    keyboard = []
+    row = []
+
+    for slot_start, slot_end in slots:
+        row.append(
+            InlineKeyboardButton(
+                text=f"🕐 {slot_start}",
+                callback_data=(
+                    f"reschedule_time:"
+                    f"{booking.id}:"
+                    f"{selected_date}:"
+                    f"{slot_start}"
+                ),
+            )
+        )
+
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="◀️ Выбрать другую дату",
+                callback_data=(
+                    f"booking_reschedule:{booking.id}"
+                ),
+            )
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🔄 <b>Перенос записи</b>\n\n"
+        f"💅 {service.name}\n"
+        f"📅 {format_date(selected)}\n"
+        f"⏱ {format_duration(service.duration_min)}\n\n"
+        "🕐 Выберите новое время:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        ),
+        parse_mode="HTML",
+    )
+
+    await callback.answer()
+# ============================================================
+# 🔄 ПЕРЕНОС ЗАПИСИ — ПОДТВЕРЖДЕНИЕ НОВОГО ВРЕМЕНИ
+# ============================================================
+
+@router.callback_query(
+    F.data.startswith("reschedule_time:")
+)
+async def reschedule_time(callback: CallbackQuery):
+    _, booking_id, selected_date, new_time = (
+        callback.data.split(":", 3)
+    )
+
+    booking_id = int(booking_id)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Booking).where(
+                Booking.id == booking_id
+            )
+        )
+
+        booking = result.scalar_one_or_none()
+
+        if booking is None:
+            await callback.answer(
+                "Запись не найдена.",
+                show_alert=True,
+            )
+            return
+
+        if booking.user_id != await get_user_id(
+            callback.from_user.id
+        ):
+            await callback.answer(
+                "Это не ваша запись.",
+                show_alert=True,
+            )
+            return
+
+        if booking.status != "confirmed":
+            await callback.answer(
+                "Эту запись нельзя перенести.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Service).where(
+                Service.id == booking.service_id,
+                Service.is_active.is_(True),
+            )
+        )
+
+        service = result.scalar_one_or_none()
+
+        if service is None:
+            await callback.answer(
+                "Услуга больше недоступна.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(Master).where(
+                Master.id == booking.master_id,
+                Master.is_active.is_(True),
+            )
+        )
+
+        master = result.scalar_one_or_none()
+
+        if master is None:
+            await callback.answer(
+                "Мастер больше недоступен.",
+                show_alert=True,
+            )
+            return
+
+        start = datetime.strptime(
+            new_time,
+            "%H:%M",
+        )
+
+        end = start + timedelta(
+            minutes=service.duration_min
+        )
+
+        end_time = end.strftime("%H:%M")
+
+        result = await session.execute(
+            select(Booking).where(
+                Booking.master_id == master.id,
+                Booking.booking_date == selected_date,
+                Booking.status.in_(
+                    ["confirmed", "pending"]
+                ),
+                Booking.id != booking.id,
+            )
+        )
+
+        existing_bookings = result.scalars().all()
+
+        if has_overlap(
+            start_time=new_time,
+            end_time=end_time,
+            bookings=existing_bookings,
+        ):
+            await callback.answer(
+                "😔 Это время уже заняли. Выберите другое.",
+                show_alert=True,
+            )
+            return
+
+        old_date = booking.booking_date
+        old_time = booking.booking_time
+
+        booking.booking_date = selected_date
+        booking.booking_time = new_time
+        booking.duration_min = service.duration_min
+
+        await session.commit()
+
+    await callback.message.edit_text(
+        "🔄 <b>Запись перенесена!</b>\n\n"
+        f"👩 Мастер: <b>{master.name}</b>\n"
+        f"💅 Услуга: <b>{service.name}</b>\n"
+        f"📅 Новая дата: <b>"
+        f"{format_date(date.fromisoformat(selected_date))}"
+        f"</b>\n"
+        f"🕐 Новое время: <b>"
+        f"{new_time}–{end_time}"
+        f"</b>\n"
+        f"💰 Цена: <b>{booking.price} ₽</b>\n"
+        f"{'💡 LED-наращивание +200 ₽' if booking.led else ''}\n\n"
+        "💗 Ваша запись успешно перенесена!",
+        parse_mode="HTML",
+    )
+
+    await callback.answer(
+        "Запись перенесена ✅"
+    )
