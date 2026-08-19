@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from bot.handlers.start import router as start_router
 from bot.handlers.services import router as services_router
+from bot.handlers.master_cabinet import router as master_router
 from database.database import init_database
 
 
@@ -20,9 +21,9 @@ if not BOT_TOKEN:
 
 
 dp = Dispatcher()
-
 dp.include_router(start_router)
 dp.include_router(services_router)
+dp.include_router(master_router)
 
 
 async def main():
