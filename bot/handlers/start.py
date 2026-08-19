@@ -51,5 +51,5 @@ async def start_handler(message: Message):
 
     await message.answer(
         text,
-        reply_markup=get_main_menu(),
+        reply_markup=get_main_menu(user.role),
     )
