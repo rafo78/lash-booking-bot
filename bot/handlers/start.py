@@ -54,9 +54,9 @@ async def start_handler(message: Message):
             )
 
     await message.answer(
-        text,
-        reply_markup=get_main_menu(),
-    )
+    text,
+    reply_markup=get_main_menu(role=user.role),
+)
 @router.message(F.text == "📋 Мои записи")
 async def my_bookings_handler(message: Message):
     telegram_user = message.from_user
@@ -146,5 +146,13 @@ async def my_bookings_handler(message: Message):
                     ],
                 ]
             ),
+
+
             parse_mode="HTML",
         )
+@router.message(F.text == "/myid")
+async def my_id_handler(message: Message):
+    await message.answer(
+        f"🆔 Ваш Telegram ID: <code>{message.from_user.id}</code>",
+        parse_mode="HTML",
+    )
